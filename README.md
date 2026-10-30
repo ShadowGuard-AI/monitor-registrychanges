@@ -1,3 +1,5 @@
+![Banner](banner.png)
+
 # monitor-registrychanges
 Monitors specific registry keys for modifications, which can indicate malware persistence or configuration changes. - Focused on System monitoring and alerts
 
