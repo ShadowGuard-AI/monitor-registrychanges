@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import sys
 import time
 
@@ -16,8 +15,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def setup_argparse():
     """Sets up the argument parser for the script."""
-    parser = argparse.ArgumentParser(description="Monitors specific registry keys for modifications.")
-    parser.add_argument("-k", "--key", required=True, help="The registry key to monitor (e.g., HKEY_LOCAL_MACHINE\\Software\\MyApplication)")
+    parser = argparse.ArgumentParser(description="Monitors the values of one named registry key for modifications. Subkeys are not monitored, and one key is monitored per run.")
+    parser.add_argument("-k", "--key", required=True, help="The one registry key whose values are monitored (e.g., HKEY_LOCAL_MACHINE\\Software\\MyApplication). Subkeys are not monitored.")
+    parser.add_argument("--include-value-data", action="store_true", help="Include value data for added and modified values in the reports. Warning: value data can hold commands and paths. By default only value names are reported.")
     parser.add_argument("-i", "--interval", type=int, default=60, help="The monitoring interval in seconds (default: 60)")
     parser.add_argument("-l", "--log", help="Path to the log file (optional)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging (DEBUG level)")
@@ -100,7 +100,7 @@ def get_registry_key_values(key_path):
         return None
 
 
-def compare_registry_values(old_values, new_values, key_path):
+def compare_registry_values(old_values, new_values, key_path, include_value_data=False):
     """
     Compares two sets of registry values and returns the differences.
 
@@ -118,7 +118,10 @@ def compare_registry_values(old_values, new_values, key_path):
         return changes # No changes if both are None
     
     if old_values is None:
-        changes["added"] = list(new_values.keys())
+        if include_value_data:
+            changes["added"] = [{"name": n, "data": v[0]} for n, v in new_values.items()]
+        else:
+            changes["added"] = list(new_values.keys())
         return changes
 
     if new_values is None:
@@ -128,7 +131,10 @@ def compare_registry_values(old_values, new_values, key_path):
     # Check for added values
     for name, value_data in new_values.items():
         if name not in old_values:
-            changes["added"].append(name)
+            if include_value_data:
+                changes["added"].append({"name": name, "data": value_data[0]})
+            else:
+                changes["added"].append(name)
 
     # Check for removed values
     for name in old_values.keys():
@@ -142,7 +148,10 @@ def compare_registry_values(old_values, new_values, key_path):
             new_value, new_type = value_data
 
             if old_value != new_value or old_type != new_type:
-                changes["modified"].append(name)
+                if include_value_data:
+                    changes["modified"].append({"name": name, "old_data": old_value, "new_data": new_value})
+                else:
+                    changes["modified"].append(name)
 
     return changes
 
@@ -184,6 +193,10 @@ def main():
     interval = args.interval
     output_file = args.output
 
+    if interval <= 0:
+        logging.error("Interval must be a positive number of seconds.")
+        sys.exit(1)
+
     if not validate_key(key_path):
         sys.exit(1)
 
@@ -202,7 +215,7 @@ def main():
             
             # Compare values and log changes
             if old_values is not None or new_values is not None: # Only compare if we had at least one successful read
-                changes = compare_registry_values(old_values, new_values, key_path)
+                changes = compare_registry_values(old_values, new_values, key_path, include_value_data=args.include_value_data)
                 log_changes(changes, key_path, output_file)
             else:
                 logging.warning(f"Skipping comparison because previous and current registry reads failed.")

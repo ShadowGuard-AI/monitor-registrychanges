@@ -1,3 +1,2 @@
-psutil>=1.0.0
-argparse>=1.0.0
-logging>=1.0.0
+# This tool uses only the Python standard library (winreg, on Windows).
+# There are no third party packages to install. Windows only.
