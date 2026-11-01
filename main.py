@@ -53,6 +53,12 @@ def get_registry_key_values(key_path):
     try:
         # Determine the hive based on the key path
         if key_path.startswith("HKEY_LOCAL_MACHINE"):
+            # The hive is chosen by prefix matching and the subkey is
+            # cut off at a fixed offset, so a path that merely starts
+            # with a hive name, without the backslash after it, is
+            # misread rather than rejected. validate_key checks only
+            # that the argument is a non empty string, so this matching
+            # is the whole of the validation.
             hive = winreg.HKEY_LOCAL_MACHINE
             sub_key = key_path[len("HKEY_LOCAL_MACHINE\\"):]
         elif key_path.startswith("HKEY_CURRENT_USER"):
@@ -124,6 +130,13 @@ def compare_registry_values(old_values, new_values, key_path, include_value_data
             changes["added"] = list(new_values.keys())
         return changes
 
+    # None carries two meanings into this comparison: the key is
+    # gone, and the read failed. An access error or any transient
+    # failure therefore reports every value under the key as
+    # removed, and when the next read succeeds it reports them
+    # all as added again. A one cycle hiccup becomes a full
+    # delete and recreate in the log, indistinguishable from the
+    # real thing.
     if new_values is None:
         changes["removed"] = list(old_values.keys())
         return changes
@@ -147,6 +160,13 @@ def compare_registry_values(old_values, new_values, key_path, include_value_data
             old_value, old_type = old_values[name]
             new_value, new_type = value_data
 
+            # A change of type alone counts as a modification, even when
+            # the data reads identically: a string rewritten as an
+            # expandable string with the same characters is reported.
+            # That is usually what I want for this key, because the type
+            # change is itself the interesting event, but an operator
+            # reading only names can chase a change that is not there in
+            # the text.
             if old_value != new_value or old_type != new_type:
                 if include_value_data:
                     changes["modified"].append({"name": name, "old_data": old_value, "new_data": new_value})
@@ -222,6 +242,11 @@ def main():
 
 
             # Update old values for the next iteration
+            # Whatever this cycle produced becomes the baseline,
+            # including a None from a failed read. The comparison rules
+            # above were written for that, but it means one bad read
+            # resets the monitor's memory entirely, and recovery looks
+            # like a mass addition rather than a resumed watch.
             old_values = new_values
             
             time.sleep(interval)
